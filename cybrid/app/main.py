@@ -14,7 +14,8 @@ from datetime import datetime, timezone
 
 import uuid
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 app = FastAPI(
@@ -246,18 +247,38 @@ def run_scenarios() -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# TEMPORARY DIAGNOSTIC (Nov 3): live /health and /docs return FastAPI 404s
-# even though the routes exist. This catch-all only fires for paths no real
-# route matches, and reports the path FastAPI actually received, so the
-# Vercel routing mismatch can be identified. REMOVE before calling the
-# demo done.
+# Vercel routing: live evidence (Nov 3 diagnostic) showed requests arrive
+# at this app with the path /api/index.py/<original> — Vercel serves this
+# app directly, bypassing the prefix stripper in api/index.py. Strip the
+# prefix here so the app routes the same on Vercel as it does locally.
+# No-op for plain paths.
 # ---------------------------------------------------------------------------
-@app.get("/{full_path:path}")
-def _diagnostic_echo(full_path: str, request: Request) -> dict:
-    return {
-        "diagnostic": True,
-        "received_path": request.url.path,
-        "full_path_param": full_path,
-        "root_path": request.scope.get("root_path"),
-        "raw_path": request.scope.get("raw_path"),
-    }
+@app.middleware("http")
+async def _strip_vercel_prefix(request, call_next):
+    path = request.scope["path"]
+    for prefix in ("/api/index.py", "/api/index"):
+        if path == prefix:
+            request.scope["path"] = "/"
+            break
+        if path.startswith(prefix + "/"):
+            request.scope["path"] = path[len(prefix):]
+            break
+    return await call_next(request)
+
+
+@app.get("/", response_class=HTMLResponse)
+def landing() -> str:
+    """Front door: what the demo models and how to run it."""
+    return """<!doctype html><html><head><meta charset="utf-8">
+<title>Cybrid Transfer-State Reconciliation Harness</title>
+<style>body{font-family:system-ui,sans-serif;max-width:720px;margin:48px auto;padding:0 20px;line-height:1.5}button{padding:10px 18px;font-size:16px;cursor:pointer}pre{background:#111;color:#eee;padding:16px;overflow:auto}</style>
+</head><body>
+<h1>Cybrid Transfer-State Reconciliation Harness</h1>
+<p>A local mock of Cybrid's Bank API transfer lifecycle: state machine,
+stuck-transfer alerts, and audit-ready records. It talks to no Cybrid
+service, moves no money, and uses no credentials or customer data.</p>
+<p><button onclick="run()">Run the three demo scenarios</button>
+&nbsp;<a href="/docs">API docs</a></p>
+<pre id="out">Press the button to run: clean, failed, and manual-intervention transfers.</pre>
+<script>async function run(){const el=document.getElementById('out');el.textContent='Running…';const r=await fetch('/scenarios/run',{method:'POST'});el.textContent=JSON.stringify(await r.json(),null,2);}</script>
+</body></html>"""

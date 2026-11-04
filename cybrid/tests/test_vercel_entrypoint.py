@@ -53,3 +53,23 @@ def test_entrypoint_strips_vercel_rewrite_prefix():
 
     docs = client.get("/api/index.py/docs")
     assert docs.status_code == 200
+
+
+def test_main_app_strips_prefix_and_serves_landing():
+    # Nov 3 diagnostic proved Vercel serves app.main directly, bypassing
+    # the entrypoint wrapper — so the strip must also live on the app
+    # itself. The bare domain must serve a landing page, not a 404.
+    import sys
+
+    sys.path.insert(0, os.path.join(HERE, ".."))
+    from app.main import app as main_app
+
+    client = TestClient(main_app)
+
+    health = client.get("/api/index.py/health")
+    assert health.status_code == 200
+    assert health.json() == {"status": "ok"}
+
+    landing = client.get("/")
+    assert landing.status_code == 200
+    assert "Reconciliation Harness" in landing.text
