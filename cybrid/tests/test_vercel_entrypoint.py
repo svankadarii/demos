@@ -73,3 +73,6 @@ def test_main_app_strips_prefix_and_serves_landing():
     landing = client.get("/")
     assert landing.status_code == 200
     assert "Reconciliation Harness" in landing.text
+    # v2 front door: interactive explorer, not a JSON dump.
+    assert "Your call" in landing.text
+    assert "Escalate to a human" in landing.text

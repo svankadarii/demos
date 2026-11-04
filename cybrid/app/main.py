@@ -268,17 +268,67 @@ async def _strip_vercel_prefix(request, call_next):
 
 @app.get("/", response_class=HTMLResponse)
 def landing() -> str:
-    """Front door: what the demo models and how to run it."""
+    """Front door: an interactive reconciliation explorer, not a JSON dump.
+
+    Loads the three scripted scenarios from /scenarios/run (one stateless
+    call, safe on serverless) and renders them as cards with timelines,
+    audit lines, and a retry-vs-escalate decision moment on the stuck one.
+    """
     return """<!doctype html><html><head><meta charset="utf-8">
 <title>Cybrid Transfer-State Reconciliation Harness</title>
-<style>body{font-family:system-ui,sans-serif;max-width:720px;margin:48px auto;padding:0 20px;line-height:1.5}button{padding:10px 18px;font-size:16px;cursor:pointer}pre{background:#111;color:#eee;padding:16px;overflow:auto}</style>
-</head><body>
+<style>
+body{font-family:system-ui,sans-serif;max-width:860px;margin:40px auto;padding:0 20px;line-height:1.5;color:#111}
+h1{font-size:30px;margin-bottom:4px}.sub{color:#555;margin-top:0}
+.cards{display:flex;gap:12px;flex-wrap:wrap;margin:20px 0}
+.card{flex:1;min-width:200px;border:2px solid #ddd;border-radius:10px;padding:14px;cursor:pointer;background:#fff}
+.card.sel{border-color:#111;background:#f7f7f7}
+.card h3{margin:0 0 4px}.badge{display:inline-block;padding:2px 10px;border-radius:20px;font-size:13px;font-weight:600}
+.ok{background:#d8f3dc}.bad{background:#fde2e2}.warn{background:#fff3bf}
+.timeline{display:flex;gap:0;margin:16px 0;flex-wrap:wrap}
+.step{padding:6px 12px;border:1px solid #ccc;border-radius:20px;margin-right:6px;font-size:14px;color:#999}
+.step.hit{background:#111;color:#fff;border-color:#111}
+.step.hitbad{background:#b91c1c;color:#fff;border-color:#b91c1c}
+.panel{border:1px solid #ddd;border-radius:10px;padding:18px;margin:16px 0}
+.audit{background:#111;color:#eee;padding:12px;border-radius:6px;overflow:auto;font-size:13px}
+button{padding:10px 18px;font-size:15px;cursor:pointer;margin-right:8px}
+.decision{border:2px solid #b91c1c;border-radius:10px;padding:16px;margin:16px 0}
+.verdict{padding:12px;border-radius:6px;margin-top:12px;font-weight:600}
+.verdict.bad{background:#fde2e2}.verdict.good{background:#d8f3dc}
+details{margin-top:16px}pre{background:#111;color:#eee;padding:12px;overflow:auto;font-size:13px}
+</style></head><body>
 <h1>Cybrid Transfer-State Reconciliation Harness</h1>
-<p>A local mock of Cybrid's Bank API transfer lifecycle: state machine,
+<p class="sub">A local mock of Cybrid's Bank API transfer lifecycle: state machine,
 stuck-transfer alerts, and audit-ready records. It talks to no Cybrid
 service, moves no money, and uses no credentials or customer data.</p>
-<p><button onclick="run()">Run the three demo scenarios</button>
-&nbsp;<a href="/docs">API docs</a></p>
-<pre id="out">Press the button to run: clean, failed, and manual-intervention transfers.</pre>
-<script>async function run(){const el=document.getElementById('out');el.textContent='Running…';const r=await fetch('/scenarios/run',{method:'POST'});el.textContent=JSON.stringify(await r.json(),null,2);}</script>
-</body></html>"""
+<p><button onclick="load()">Run the three demo scenarios</button> <a href="/docs">API docs</a></p>
+<div id="cards" class="cards"></div>
+<div id="detail"></div>
+<details><summary>Raw JSON (for engineers)</summary><pre id="raw">Press the button above.</pre></details>
+<script>
+var DATA=null, SEL=null;
+var ORDER=["pending","in_progress","completed","failed","cancelled","reversed","manual_intervention"];
+function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;");}
+function badge(state){var c=state==="completed"?"ok":(state==="failed"||state==="manual_intervention"?"bad":"warn");return '<span class="badge '+c+'">'+esc(state)+'</span>';}
+async function load(){var el=document.getElementById("cards");el.textContent="Running…";
+var r=await fetch("/scenarios/run",{method:"POST"});DATA=await r.json();
+document.getElementById("raw").textContent=JSON.stringify(DATA,null,2);
+el.innerHTML="";DATA.forEach(function(d,i){var t=d.transfer;var div=document.createElement("div");div.className="card";div.id="card-"+i;
+div.innerHTML="<h3>"+esc(d.scenario)+"</h3>"+badge(t.state)+"<p style='margin:8px 0 0'>"+esc(t.route)+"<br>"+esc(t.source)+" → "+esc(t.destination)+"</p>";
+div.onclick=function(){select(i);};el.appendChild(div);});select(0);}
+function select(i){SEL=i;DATA.forEach(function(d,j){document.getElementById("card-"+j).className="card"+(j===i?" sel":"");});
+var d=DATA[i],t=d.transfer,det=document.getElementById("detail");
+var hist=t.history||[];var tl=ORDER.map(function(s){var cls="step";if(hist.indexOf(s)>=0){cls+=" hit";if(s==="manual_intervention"||s==="failed"){cls+=" hitbad";}}return '<span class="'+cls+'">'+esc(s)+"</span>";}).join(" → ");
+var html='<div class="panel"><h2 style="margin-top:0">'+esc(d.scenario)+" transfer</h2>"+badge(t.state)+"<div class='timeline'>"+tl+"</div>"+
+"<p><b>Type:</b> "+esc(t.type)+" &nbsp; <b>Fees:</b> "+esc(t.fees)+" &nbsp; <b>FX:</b> "+esc(t.fx_rate)+"<br>"+
+"<b>Route:</b> "+esc(t.route)+"<br><b>Recipient:</b> "+esc(t.recipient)+"<br><b>quoteGuid:</b> "+esc(t.quoteGuid)+
+(t.failure_reason?"<br><b>Failure reason:</b> "+esc(t.failure_reason):"")+"</p>"+
+"<p><b>Audit trail</b></p><div class='audit'>"+esc(d.audit_line)+"</div>";
+if(d.scenario==="manual_intervention"){html+='<div class="decision"><h3 style="margin-top:0">Your call: this transfer is stuck</h3>'+
+"<p>A provider step went quiet mid-payout. The money may or may not have moved. What do you do?</p>"+
+'<button onclick="verdict(false)">Retry it</button><button onclick="verdict(true)">Escalate to a human</button><div id="verdict"></div></div>';}
+html+="</div>";det.innerHTML=html;}
+function verdict(escalate){var v=document.getElementById("verdict");
+if(escalate){v.className="verdict good";v.textContent="Correct. The transfer is frozen for human review with its full audit trail intact. No duplicate payout, no lost money — exactly what the harness flags: escalate, do not retry blindly.";}
+else{v.className="verdict bad";v.textContent="Risky. The original transfer may still settle. Retrying blindly is how money gets sent twice — the exact failure this harness exists to catch.";}}
+load();
+</script></body></html>"""
