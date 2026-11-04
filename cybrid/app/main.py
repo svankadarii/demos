@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 
 import uuid
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
 app = FastAPI(
@@ -243,3 +243,21 @@ def run_scenarios() -> list[dict]:
             }
         )
     return results
+
+
+# ---------------------------------------------------------------------------
+# TEMPORARY DIAGNOSTIC (Nov 3): live /health and /docs return FastAPI 404s
+# even though the routes exist. This catch-all only fires for paths no real
+# route matches, and reports the path FastAPI actually received, so the
+# Vercel routing mismatch can be identified. REMOVE before calling the
+# demo done.
+# ---------------------------------------------------------------------------
+@app.get("/{full_path:path}")
+def _diagnostic_echo(full_path: str, request: Request) -> dict:
+    return {
+        "diagnostic": True,
+        "received_path": request.url.path,
+        "full_path_param": full_path,
+        "root_path": request.scope.get("root_path"),
+        "raw_path": request.scope.get("raw_path"),
+    }
