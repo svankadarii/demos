@@ -38,3 +38,18 @@ def test_entrypoint_exposes_the_same_app():
     assert by_name["manual_intervention"]["transfer"]["state"] == "manual_intervention"
     assert by_name["manual_intervention"]["next_action"] == "escalate, do not retry blindly"
     assert "audit_line" in by_name["manual_intervention"]
+
+
+def test_entrypoint_strips_vercel_rewrite_prefix():
+    # Live symptom (Nov 3): Vercel rewrote /health to the function path and
+    # FastAPI answered {"detail": "Not Found"}. The entrypoint must route
+    # the rewritten path to the same handler as the plain path.
+    app = _load_entrypoint_app()
+    client = TestClient(app)
+
+    health = client.get("/api/index.py/health")
+    assert health.status_code == 200
+    assert health.json() == {"status": "ok"}
+
+    docs = client.get("/api/index.py/docs")
+    assert docs.status_code == 200
